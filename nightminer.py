@@ -644,8 +644,8 @@ class SimpleJsonRpcClient(object):
       except self.RequestReplyWarning, e:
         output = e.message
         if e.request:
-          output += '\n  ' + e.request
-        output += '\n  ' + e.reply
+          output += '\n  ' + str(e.request)
+        output += '\n  ' + str(e.reply)
         log(output, LEVEL_ERROR)
 
 
@@ -719,7 +719,7 @@ class Miner(SimpleJsonRpcClient):
 
     # New work, stop what we were doing before, and start on this.
     if reply.get('method') == 'mining.notify':
-      if 'params' not in reply or len(reply['params']) != 9:
+      if 'params' not in reply or len(reply['params']) < 9:
         raise self.MinerWarning('Malformed mining.notify message', reply)
 
       (job_id, prevhash, coinb1, coinb2, merkle_branches, version, nbits, ntime, clean_jobs) = reply['params']
@@ -729,7 +729,7 @@ class Miner(SimpleJsonRpcClient):
 
     # The server wants us to change our difficulty (on all *future* work)
     elif reply.get('method') == 'mining.set_difficulty':
-      if 'params' not in reply or len(reply['params']) != 1:
+      if 'params' not in reply or len(reply['params'])<1:
         raise self.MinerWarning('Malformed mining.set_difficulty message', reply)
 
       (difficulty, ) = reply['params']
@@ -742,12 +742,12 @@ class Miner(SimpleJsonRpcClient):
 
       # ...subscribe; set-up the work and request authorization
       if request.get('method') == 'mining.subscribe':
-        if 'result' not in reply or len(reply['result']) != 3 or len(reply['result'][0]) != 2:
+        if 'result' not in reply or len(reply['result']) < 2:
           raise self.MinerWarning('Reply to mining.subscribe is malformed', reply, request)
 
-        ((mining_notify, subscription_id), extranounce1, extranounce2_size) = reply['result']
+        (mining_notify, subscription_id) = reply['result']
 
-        self._subscription.set_subscription(subscription_id, extranounce1, extranounce2_size)
+        self._subscription.set_subscription(subscription_id, None, None )
 
         log('Subscribed: subscription_id=%s' % subscription_id, LEVEL_DEBUG)
 
