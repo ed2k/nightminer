@@ -41,8 +41,8 @@
 import base64, binascii, json, hashlib, hmac, math, socket, struct, sys, threading, time, urlparse
 
 # DayMiner (ah-ah-ah), fighter of the...
-USER_AGENT = "NightMiner"
-VERSION = [0, 1]
+USER_AGENT = "ccminer"
+VERSION = [3, 1]
 
 # You're a master of Karate and friendship for everyone.
 
@@ -344,7 +344,7 @@ class Job(object):
            ~Alan Perlis
   '''
 
-  def __init__(self, job_id, prevhash, coinb1, coinb2, merkle_branches, version, nbits, ntime, target, extranounce1, extranounce2_size, proof_of_work):
+  def __init__(self, job_id, prevhash, coinb1, coinb2, merkle_branches, version, nbits, ntime, target, proof_of_work):
 
     # Job parts from the mining.notify command
     self._job_id = job_id
@@ -358,8 +358,6 @@ class Job(object):
 
     # Job information needed to mine from mining.subsribe
     self._target = target
-    self._extranounce1 = extranounce1
-    self._extranounce2_size = extranounce2_size
 
     # Proof of work algorithm
     self._proof_of_work = proof_of_work
@@ -382,8 +380,6 @@ class Job(object):
   ntime = property(lambda s: s._ntime)
 
   target = property(lambda s: s._target)
-  extranounce1 = property(lambda s: s._extranounce1)
-  extranounce2_size = property(lambda s: s._extranounce2_size)
 
   proof_of_work = property(lambda s: s._proof_of_work)
 
@@ -396,10 +392,10 @@ class Job(object):
     return self._hash_count / self._dt
 
 
-  def merkle_root_bin(self, extranounce2_bin):
+  def merkle_root_bin(self ):
     '''Builds a merkle root from the merkle tree'''
 
-    coinbase_bin = unhexlify(self._coinb1) + unhexlify(self._extranounce1) + extranounce2_bin + unhexlify(self._coinb2)
+    coinbase_bin = unhexlify(self._coinb1) +  unhexlify(self._coinb2)
     coinbase_hash_bin = sha256d(coinbase_bin)
 
     merkle_root = coinbase_hash_bin
@@ -428,14 +424,14 @@ class Job(object):
     '''
 
     t0 = time.time()
-
+    print('0v 1h8 9c16 25nt 26nb 27x8 35x80',(self.version, self.prevhash, self.coinbase, self.ntime, self.nbits))
     # @TODO: test for extranounce != 0... Do I reverse it or not?
     for extranounce2 in xrange(0, 0x7fffffff):
 
       # Must be unique for any given job id, according to http://mining.bitcoin.cz/stratum-mining/ but never seems enforced?
       extranounce2_bin = struct.pack('<I', extranounce2)
 
-      merkle_root_bin = self.merkle_root_bin(extranounce2_bin)
+      merkle_root_bin = self.merkle_root_bin()
       header_prefix_bin = swap_endian_word(self._version) + swap_endian_words(self._prevhash) + merkle_root_bin + swap_endian_word(self._ntime) + swap_endian_word(self._nbits)
       for nounce in xrange(nounce_start, 0x7fffffff, nounce_stride):
         # This job has been asked to stop
@@ -465,7 +461,7 @@ class Job(object):
 
 
   def __str__(self):
-    return '<Job id=%s prevhash=%s coinb1=%s coinb2=%s merkle_branches=%s version=%s nbits=%s ntime=%s target=%s extranounce1=%s extranounce2_size=%d>' % (self.id, self.prevhash, self.coinb1, self.coinb2, self.merkle_branches, self.version, self.nbits, self.ntime, self.target, self.extranounce1, self.extranounce2_size)
+    return '<Job id=%s prevhash=%s coinb1=%s coinb2=%s merkle_branches=%s version=%s nbits=%s ntime=%s target=%s >' % (self.id, self.prevhash, self.coinb1, self.coinb2, self.merkle_branches, self.version, self.nbits, self.ntime, self.target )
 
 
 # Subscription state
@@ -481,8 +477,6 @@ class Subscription(object):
   def __init__(self):
     self._id = None
     self._difficulty = None
-    self._extranounce1 = None
-    self._extranounce2_size = None
     self._target = None
     self._worker_name = None
 
@@ -495,8 +489,6 @@ class Subscription(object):
   difficulty = property(lambda s: s._difficulty)
   target = property(lambda s: s._target)
 
-  extranounce1 = property(lambda s: s._extranounce1)
-  extranounce2_size = property(lambda s: s._extranounce2_size)
 
 
   def set_worker_name(self, worker_name):
@@ -522,14 +514,25 @@ class Subscription(object):
     self._difficulty = difficulty
     self._set_target(target)
 
+  def set_target(self, hexs):
+    t = int(hexs,16)
+    print(hexs, t)
+    if t < 0: raise self.StateException('target must be non-negative')
 
-  def set_subscription(self, subscription_id, extranounce1, extranounce2_size):
+    # Compute target
+    if t == 0:
+      target = 2 ** 256 - 1
+    else:
+      target = min(int((0xffff0000 * 2 ** (256 - 64) + 1) / t - 1 + 0.5), 2 ** 256 - 1)
+
+    self._difficulty = target
+    self._set_target(t)
+
+  def set_subscription(self, subscription_id ):
     if self._id is not None:
       raise self.StateException('Already subscribed')
 
     self._id = subscription_id
-    self._extranounce1 = extranounce1
-    self._extranounce2_size = extranounce2_size
 
 
   def create_job(self, job_id, prevhash, coinb1, coinb2, merkle_branches, version, nbits, ntime):
@@ -548,14 +551,12 @@ class Subscription(object):
       nbits = nbits,
       ntime = ntime,
       target = self.target,
-      extranounce1 = self._extranounce1,
-      extranounce2_size = self.extranounce2_size,
       proof_of_work = self.ProofOfWork
     )
 
 
   def __str__(self):
-    return '<Subscription id=%s, extranounce1=%s, extranounce2_size=%d, difficulty=%d worker_name=%s>' % (self.id, self.extranounce1, self.extranounce2_size, self.difficulty, self.worker_name)
+    return '<Subscription id=%s, difficulty=%d worker_name=%s>' % (self.id, self.difficulty, self.worker_name)
 
 
 class SubscriptionScrypt(Subscription):
@@ -736,6 +737,14 @@ class Miner(SimpleJsonRpcClient):
       self._subscription.set_difficulty(difficulty)
 
       log('Change difficulty: difficulty=%s' % difficulty, LEVEL_DEBUG)
+    elif reply.get('method') == 'mining.set_target':
+      if 'params' not in reply or len(reply['params'])<1:
+        raise self.MinerWarning('Malformed mining.set_target message', reply)
+
+      difficulty = reply['params'][0]
+      self._subscription.set_target(difficulty)
+
+      log('Change target : difficulty=%s' % difficulty, LEVEL_DEBUG)
 
     # This is a reply to...
     elif request:
@@ -747,7 +756,7 @@ class Miner(SimpleJsonRpcClient):
 
         (mining_notify, subscription_id) = reply['result']
 
-        self._subscription.set_subscription(subscription_id, None, None )
+        self._subscription.set_subscription(subscription_id  )
 
         log('Subscribed: subscription_id=%s' % subscription_id, LEVEL_DEBUG)
 
@@ -803,7 +812,7 @@ class Miner(SimpleJsonRpcClient):
     def run(job):
       try:
         for result in job.mine():
-          params = [ self._subscription.worker_name ] + [ result[k] for k in ('job_id', 'extranounce2', 'ntime', 'nounce') ]
+          params = [ self._subscription.worker_name ] + [ result[k] for k in ('job_id', 'ntime', 'nounce') ]
           self.send(method = 'mining.submit', params = params)
           log("Found share: " + str(params), LEVEL_INFO)
         log("Hashrate: %s" % human_readable_hashrate(job.hashrate), LEVEL_INFO)
@@ -847,8 +856,8 @@ def test_subscription():
   # Set up the subscription
   reply = json.loads('{"error": null, "id": 1, "result": [["mining.notify", "ae6812eb4cd7735a302a8a9dd95cf71f"], "f800880e", 4]}')
   log('TEST: %r' % reply, LEVEL_DEBUG)
-  ((mining_notify, subscription_id), extranounce1, extranounce2_size) = reply['result']
-  subscription.set_subscription(subscription_id, extranounce1, extranounce2_size)
+  (mining_notify, subscription_id) = reply['result']
+  subscription.set_subscription(subscription_id)
 
   # Set the difficulty
   reply = json.loads('{"params": [32], "id": null, "method": "mining.set_difficulty"}')
@@ -876,7 +885,7 @@ def test_subscription():
     log('TEST: found share - %r' % repr(result), LEVEL_DEBUG)
     break
 
-  valid = { 'ntime': '52c7b81a', 'nounce': '482601c0', 'extranounce2': '00000000', 'job_id': u'1db7' }
+  valid = { 'ntime': '52c7b81a', 'nounce': '482601c0', 'job_id': u'1db7' }
   log('TEST: Correct answer %r' % valid, LEVEL_DEBUG)
 
 
@@ -934,13 +943,12 @@ if __name__ == '__main__':
   if options.quiet: QUIET = True
 
   if DEBUG:
-    for library in SCRYPT_LIBRARIES:
-      set_scrypt_library(library)
-      test_subscription()
-
     # Set us to a faster library if available
-    set_scrypt_library()
     if options.algo == ALGORITHM_SCRYPT:
+      for library in SCRYPT_LIBRARIES:
+        set_scrypt_library(library)
+      #test_subscription()
+      set_scrypt_library()
       log('Using scrypt library %r' % SCRYPT_LIBRARY, LEVEL_DEBUG)
 
   # The want a daemon, give them a daemon
